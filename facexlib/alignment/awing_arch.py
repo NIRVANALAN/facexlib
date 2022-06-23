@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def calculate_points(heatmaps):
+def calculate_points(heatmaps: np.ndarray):
     # change heatmaps to landmarks
     B, N, H, W = heatmaps.shape
     HW = H * W
@@ -354,6 +354,38 @@ class FAN(nn.Module):
                 previous = previous + ll + tmp_out_
 
         return outputs, boundary_channels
+
+    def get_heatmaps(self, img: torch.Tensor, return_lms=False):
+        # assert img.min()>0 and img.max()<1, 'normalize to [0,1]'
+
+        B, _, H, W = img.shape
+        offset = W / 64, H / 64, 0, 0
+        inp = torch.nn.functional.interpolate(img, size=(256, 256)) # already rgb order
+
+        
+        # normalize to [0,1]
+        def norm_ip(img, low, high):
+            img.clamp_(min=low, max=high)
+            img.sub_(low).div_(max(high - low, 1e-5))
+
+        def norm_range(t, value_range=None):
+            norm_ip(t, float(t.min()), float(t.max()))
+
+        norm_range(inp)
+        # inp.div_(255.0).unsqueeze_(0)
+
+        outputs, _ = self.forward(inp)
+        out = outputs[-1][:, :-1, :, :]
+
+        # * for visualization
+        if return_lms:
+            heatmaps = out.detach().cpu().numpy()
+            pred = calculate_points(heatmaps).reshape(-1, 2)
+            pred *= offset[:2]
+            pred += offset[-2:]
+            return pred
+
+        return out # for training
 
     def get_landmarks(self, img, device='cuda'):
         H, W, _ = img.shape
